@@ -10,6 +10,8 @@ import (
 
 	"github.com/nbvehbq/go-loyalty-service/internal/logger"
 	"github.com/nbvehbq/go-loyalty-service/internal/server"
+	"github.com/nbvehbq/go-loyalty-service/internal/session"
+	"github.com/nbvehbq/go-loyalty-service/internal/storage/postgres"
 )
 
 func main() {
@@ -26,9 +28,13 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var db server.Repository
+	session := session.NewSessionStorage(ctx)
+	db, err := postgres.NewStorage(ctx, cfg.DSN)
+	if err != nil {
+		log.Fatal(err, "connect to db")
+	}
 
-	server, err := server.NewServer(db, cfg)
+	server, err := server.NewServer(db, session, cfg)
 	if err != nil {
 		log.Fatal(err, "create server")
 	}

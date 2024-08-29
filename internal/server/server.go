@@ -6,26 +6,38 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/nbvehbq/go-loyalty-service/internal/logger"
+	"github.com/nbvehbq/go-loyalty-service/internal/model"
 )
 
-type Repository interface{}
+type Repository interface {
+	CreateUser(ctx context.Context, login, pass string) (int64, error)
+	GetUserByLogin(ctx context.Context, login string) (*model.User, error)
+}
+
+type SessionStorage interface {
+	Set(int64) (string, error)
+	Get(string) (int64, bool)
+}
 
 type Server struct {
 	srv     *http.Server
 	storage Repository
+	session SessionStorage
 	DSN     string
 }
 
-func NewServer(storage Repository, cfg *Config) (*Server, error) {
+func NewServer(storage Repository, session SessionStorage, cfg *Config) (*Server, error) {
 	mux := chi.NewRouter()
 
 	s := &Server{
 		srv:     &http.Server{Addr: cfg.ServerAddress, Handler: mux},
 		storage: storage,
+		session: session,
 		DSN:     cfg.DSN,
 	}
 
-	mux.Get(`/`, logger.WithLogging(s.helloHandler))
+	mux.Post(`/api/user/register`, logger.WithLogging(s.registerHandler))
+	mux.Post(`/api/user/login`, logger.WithLogging(s.loginHandler))
 
 	return s, nil
 }
