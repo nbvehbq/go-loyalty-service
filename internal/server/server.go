@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
-	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/nbvehbq/go-loyalty-service/internal/logger"
 )
 
 type Repository interface{}
@@ -25,13 +25,13 @@ func NewServer(storage Repository, cfg *Config) (*Server, error) {
 		DSN:     cfg.DSN,
 	}
 
-	mux.Get(`/`, s.helloHandler)
+	mux.Get(`/`, logger.WithLogging(s.helloHandler))
 
 	return s, nil
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	log.Println("Server started.")
+	logger.Log.Info("Server started.")
 
 	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
@@ -41,7 +41,7 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	log.Println("Server stoped.")
+	logger.Log.Info("Server stoped.")
 
 	return s.srv.Shutdown(ctx)
 }

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nbvehbq/go-loyalty-service/internal/logger"
 	"github.com/nbvehbq/go-loyalty-service/internal/server"
 )
 
@@ -16,6 +17,10 @@ func main() {
 
 	if err != nil {
 		log.Fatal(err, "Load config")
+	}
+
+	if err := logger.Initialize(cfg.LogLevel); err != nil {
+		log.Fatal(err, "initialize logger")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
