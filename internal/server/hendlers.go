@@ -173,6 +173,81 @@ func (s *Server) listOrderHandler(res http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func (s *Server) getBalanceHandler(res http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	uid := ctx.Value("uid").(int64)
+
+	balance, err := s.storage.GetBalance(ctx, uid)
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	res.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(res).Encode(balance); err != nil {
+		logger.Log.Error("error", zap.Error(err))
+	}
+}
+
+func (s *Server) listWithdrawalsHandler(res http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	uid := ctx.Value("uid").(int64)
+
+	withdrawals, err := s.storage.ListWithdrawals(ctx, uid)
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(withdrawals) == 0 {
+		res.WriteHeader(http.StatusNoContent)
+		return
+	}
+	res.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(res).Encode(withdrawals); err != nil {
+		logger.Log.Error("error", zap.Error(err))
+	}
+}
+
+func (s *Server) withdrawHandler(res http.ResponseWriter, req *http.Request) {
+	uid := req.Context().Value("uid").(int64)
+
+	var dto model.WithdrawalDTO
+	if err := json.NewDecoder(req.Body).Decode(&dto); err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	for _, b := range dto.Order {
+		if b < 0x30 || b > 0x39 {
+			http.Error(res, "", http.StatusUnprocessableEntity)
+			return
+		}
+	}
+
+	if !luhn([]byte(dto.Order)) {
+		http.Error(res, "", http.StatusUnprocessableEntity)
+		return
+	}
+
+	balance, err := s.storage.GetBalance(req.Context(), uid)
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if balance.Current < dto.Sum {
+		http.Error(res, "", http.StatusPaymentRequired)
+		return
+	}
+
+	dto.UserId = uid
+	if err := s.storage.CreateWithdrawal(req.Context(), &dto); err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 func luhn(s []byte) bool {
 	var sum int
 	for i := 0; i < len(s); i++ {

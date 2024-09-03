@@ -16,6 +16,9 @@ type Repository interface {
 	CreateOrder(ctx context.Context, uid int64, order string) error
 	GetOrderByNumber(ctx context.Context, number string) (*model.Order, error)
 	ListOrders(ctx context.Context, uid int64) ([]*model.Order, error)
+	GetBalance(ctx context.Context, uid int64) (*model.Balance, error)
+	ListWithdrawals(ctx context.Context, uid int64) ([]*model.Withdrawal, error)
+	CreateWithdrawal(ctx context.Context, dto *model.WithdrawalDTO) error
 }
 
 type SessionStorage interface {
@@ -55,6 +58,10 @@ func NewServer(storage Repository, session SessionStorage, cfg *Config) (*Server
 
 		r.Post(`/api/user/orders`, s.uploadOrderHandler)
 		r.Get(`/api/user/orders`, s.listOrderHandler)
+
+		r.Get(`/api/user/balance`, s.getBalanceHandler)
+		r.Get(`/api/user/withdrawals`, s.listWithdrawalsHandler)
+		r.Post(`/api/user/balance/withdraw`, s.withdrawHandler)
 	})
 
 	return s, nil

@@ -66,6 +66,19 @@ func initDatabaseStructure(ctx context.Context, db *sqlx.DB) error {
 
 	ALTER TABLE "order" DROP CONSTRAINT IF EXISTS "order_user_fkey";
 	ALTER TABLE "order" ADD CONSTRAINT "order_user_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+	
+	CREATE TABLE IF NOT EXISTS "withdrawal" (
+	  id SERIAL NOT NULL,
+		user_id INTEGER NOT NULL,
+		"order" TEXT NOT NULL,
+		sum INT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+		CONSTRAINT "withdrawal_id_pkey" PRIMARY KEY ("id")
+	);
+
+	ALTER TABLE "withdrawal" DROP CONSTRAINT IF EXISTS "withdrawal_user_fkey";
+	ALTER TABLE "withdrawal" ADD CONSTRAINT "withdrawal_user_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 	`
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
@@ -140,4 +153,41 @@ func (s *Storage) ListOrders(ctx context.Context, uid int64) ([]*model.Order, er
 	}
 
 	return orders, nil
+}
+
+func (s *Storage) GetBalance(ctx context.Context, uid int64) (*model.Balance, error) {
+	var balance model.Balance
+	query := `
+	SELECT SUM(u.accrual) - SUM(u.windrawn) "current", SUM(u.windrawn) windrawn from (
+		SELECT SUM(accrual) accrual, 0 windrawn FROM "order" WHERE user_id = $1
+		union ALL 
+		SELECT 0, SUM(sum) FROM "withdrawal" WHERE user_id = $1
+	) u;`
+
+	if err := s.db.GetContext(ctx, &balance, query, uid); err != nil {
+		return nil, errors.Wrap(err, "get balance")
+	}
+
+	return &balance, nil
+}
+
+func (s *Storage) ListWithdrawals(ctx context.Context, uid int64) ([]*model.Withdrawal, error) {
+	var withdrawals []*model.Withdrawal
+	query := `SELECT id, user_id, "order", sum, created_at FROM "withdrawal" WHERE user_id = $1 ORDER BY created_at DESC;`
+
+	if err := s.db.SelectContext(ctx, &withdrawals, query, uid); err != nil {
+		return nil, errors.Wrap(err, "list withdrawals")
+	}
+
+	return withdrawals, nil
+}
+
+func (s *Storage) CreateWithdrawal(ctx context.Context, dto *model.WithdrawalDTO) error {
+	query := `INSERT INTO "withdrawal" (user_id, "order", sum) VALUES ($1, $2, $3);`
+
+	if _, err := s.db.ExecContext(ctx, query, dto.UserId, dto.Order, dto.Sum); err != nil {
+		return errors.Wrap(err, "create withdrawal")
+	}
+
+	return nil
 }
