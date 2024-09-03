@@ -13,6 +13,14 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	StatusNew         = "NEW"
+	StatusRegistered  = "REGISTERED"
+	StatusInvalid     = "INVALID"
+	StatusProccessing = "PROCESSING"
+	StatusProcessed   = "PROCESSED"
+)
+
 type Storage struct {
 	db *sqlx.DB
 }
@@ -41,6 +49,23 @@ func initDatabaseStructure(ctx context.Context, db *sqlx.DB) error {
 	);
 	
 	CREATE UNIQUE INDEX IF NOT EXISTS "user_login_key" ON "user"("login");
+
+	CREATE TABLE IF NOT EXISTS "order" (
+	  id SERIAL NOT NULL,
+		number TEXT NOT NULL,
+	  user_id INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		accrual INT,
+	  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+		CONSTRAINT "order_id_pkey" PRIMARY KEY ("id"),
+		CONSTRAINT "order_number_key" UNIQUE ("number")
+	);
+
+	CREATE INDEX IF NOT EXISTS "order_createdAt_idx" ON "order"(created_at DESC);
+
+	ALTER TABLE "order" DROP CONSTRAINT IF EXISTS "order_user_fkey";
+	ALTER TABLE "order" ADD CONSTRAINT "order_user_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 	`
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
@@ -79,4 +104,40 @@ func (s *Storage) GetUserByLogin(ctx context.Context, login string) (*model.User
 	}
 
 	return &user, nil
+}
+
+func (s *Storage) CreateOrder(ctx context.Context, uid int64, order string) error {
+	query := `INSERT INTO "order" (number, user_id, status) VALUES ($1, $2, $3);`
+
+	if _, err := s.db.ExecContext(ctx, query, order, uid, StatusNew); err != nil {
+		return errors.Wrap(err, "create order")
+	}
+
+	return nil
+}
+
+func (s *Storage) GetOrderByNumber(ctx context.Context, number string) (*model.Order, error) {
+	var order model.Order
+	query := `SELECT id, number, user_id, status, accrual, created_at FROM "order" WHERE number = $1;`
+
+	if err := s.db.GetContext(ctx, &order, query, number); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, storage.ErrOrderNotFound
+		}
+		return nil, errors.Wrap(err, "get order")
+	}
+
+	return &order, nil
+}
+
+func (s *Storage) ListOrders(ctx context.Context, uid int64) ([]*model.Order, error) {
+	var orders []*model.Order
+	query := `SELECT id, number, user_id, status, accrual, created_at FROM "order" 
+	WHERE user_id = $1 ORDER BY created_at DESC;`
+
+	if err := s.db.SelectContext(ctx, &orders, query, uid); err != nil {
+		return nil, errors.Wrap(err, "list orders")
+	}
+
+	return orders, nil
 }

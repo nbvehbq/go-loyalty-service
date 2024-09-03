@@ -40,7 +40,6 @@ func main() {
 	}
 
 	go func() {
-		defer cancel()
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 

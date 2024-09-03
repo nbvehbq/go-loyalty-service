@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/nbvehbq/go-loyalty-service/internal/logger"
@@ -104,4 +105,86 @@ func (s *Server) loginHandler(res http.ResponseWriter, req *http.Request) {
 	setCookie(res, sid)
 
 	res.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) uploadOrderHandler(res http.ResponseWriter, req *http.Request) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, b := range body {
+		if b < 0x30 || b > 0x39 {
+			http.Error(res, "", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if !luhn(body) {
+		http.Error(res, "", http.StatusUnprocessableEntity)
+		return
+	}
+
+	ctx := req.Context()
+	uid := ctx.Value("uid").(int64)
+
+	order, err := s.storage.GetOrderByNumber(ctx, string(body))
+	if err != nil && !errors.Is(err, storage.ErrOrderNotFound) {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if order != nil {
+		if order.UserId == uid {
+			res.WriteHeader(http.StatusOK)
+			return
+		}
+
+		http.Error(res, "", http.StatusConflict)
+		return
+	}
+
+	if err := s.storage.CreateOrder(ctx, uid, string(body)); err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	res.WriteHeader(http.StatusCreated)
+}
+
+func (s *Server) listOrderHandler(res http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	uid := ctx.Value("uid").(int64)
+
+	orders, err := s.storage.ListOrders(ctx, uid)
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(orders) == 0 {
+		res.WriteHeader(http.StatusNoContent)
+		return
+	}
+	res.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(res).Encode(orders); err != nil {
+		logger.Log.Error("error", zap.Error(err))
+	}
+}
+
+func luhn(s []byte) bool {
+	var sum int
+	for i := 0; i < len(s); i++ {
+		v := int(s[i] - '0')
+		if i&1 == len(s)&1 {
+			v *= 2
+			if v > 9 {
+				v -= 9
+			}
+		}
+		sum += v
+	}
+
+	return sum%10 == 0
 }

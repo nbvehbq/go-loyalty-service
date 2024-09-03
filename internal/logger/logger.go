@@ -48,8 +48,8 @@ func Initialize(level string) error {
 	return nil
 }
 
-func WithLogging(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func Middleware(next http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
 		responseData := &responseData{
@@ -60,7 +60,7 @@ func WithLogging(h http.HandlerFunc) http.HandlerFunc {
 			ResponseWriter: w,
 			responseData:   responseData,
 		}
-		h(&lw, r)
+		next.ServeHTTP(&lw, r)
 
 		duration := time.Since(start)
 
@@ -73,4 +73,6 @@ func WithLogging(h http.HandlerFunc) http.HandlerFunc {
 			zap.Int("size", responseData.size),
 		)
 	}
+
+	return http.HandlerFunc(fn)
 }

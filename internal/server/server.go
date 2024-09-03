@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
 	"github.com/nbvehbq/go-loyalty-service/internal/logger"
 	"github.com/nbvehbq/go-loyalty-service/internal/model"
@@ -12,6 +13,9 @@ import (
 type Repository interface {
 	CreateUser(ctx context.Context, login, pass string) (int64, error)
 	GetUserByLogin(ctx context.Context, login string) (*model.User, error)
+	CreateOrder(ctx context.Context, uid int64, order string) error
+	GetOrderByNumber(ctx context.Context, number string) (*model.Order, error)
+	ListOrders(ctx context.Context, uid int64) ([]*model.Order, error)
 }
 
 type SessionStorage interface {
@@ -27,17 +31,31 @@ type Server struct {
 }
 
 func NewServer(storage Repository, session SessionStorage, cfg *Config) (*Server, error) {
-	mux := chi.NewRouter()
+	r := chi.NewRouter()
 
 	s := &Server{
-		srv:     &http.Server{Addr: cfg.ServerAddress, Handler: mux},
+		srv:     &http.Server{Addr: cfg.ServerAddress, Handler: r},
 		storage: storage,
 		session: session,
 		DSN:     cfg.DSN,
 	}
 
-	mux.Post(`/api/user/register`, logger.WithLogging(s.registerHandler))
-	mux.Post(`/api/user/login`, logger.WithLogging(s.loginHandler))
+	r.Use(logger.Middleware)
+	r.Use(middleware.Recoverer)
+
+	// Public routes
+	r.Group(func(r chi.Router) {
+		r.Post(`/api/user/register`, s.registerHandler)
+		r.Post(`/api/user/login`, s.loginHandler)
+	})
+
+	// Private routes
+	r.Group(func(r chi.Router) {
+		r.Use(Authenticator(s.session))
+
+		r.Post(`/api/user/orders`, s.uploadOrderHandler)
+		r.Get(`/api/user/orders`, s.listOrderHandler)
+	})
 
 	return s, nil
 }
