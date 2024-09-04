@@ -67,6 +67,7 @@ func (s *Server) registerHandler(res http.ResponseWriter, req *http.Request) {
 	}
 
 	setCookie(res, sid)
+	res.Header().Set("Authorization", sid)
 
 	res.WriteHeader(http.StatusOK)
 }
@@ -103,6 +104,7 @@ func (s *Server) loginHandler(res http.ResponseWriter, req *http.Request) {
 	}
 
 	setCookie(res, sid)
+	res.Header().Set("Authorization", sid)
 
 	res.WriteHeader(http.StatusOK)
 }
@@ -150,7 +152,7 @@ func (s *Server) uploadOrderHandler(res http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	res.WriteHeader(http.StatusCreated)
+	res.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) listOrderHandler(res http.ResponseWriter, req *http.Request) {

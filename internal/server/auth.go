@@ -9,12 +9,16 @@ func Authenticator(s SessionStorage) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie("session")
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusUnauthorized)
-				return
+			payload := r.Header.Get("Authorization")
+
+			var sid string
+			if err == http.ErrNoCookie {
+				sid = payload
+			} else {
+				sid = cookie.Value
 			}
 
-			uid, ok := s.Get(cookie.Value)
+			uid, ok := s.Get(sid)
 			if !ok {
 				http.Error(w, "session not found", http.StatusUnauthorized)
 				return
