@@ -54,6 +54,6 @@ func main() {
 	}()
 
 	if err := server.Run(ctx); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }

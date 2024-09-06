@@ -8,22 +8,23 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/nbvehbq/go-loyalty-service/internal/logger"
 	"github.com/nbvehbq/go-loyalty-service/internal/model"
+	"github.com/pkg/errors"
 )
 
 type Repository interface {
 	CreateUser(ctx context.Context, login, pass string) (int64, error)
 	GetUserByLogin(ctx context.Context, login string) (*model.User, error)
-	CreateOrder(ctx context.Context, uid int64, order string) error
+	CreateOrder(ctx context.Context, uid int64, order string) (int64, error)
 	GetOrderByNumber(ctx context.Context, number string) (*model.Order, error)
-	ListOrders(ctx context.Context, uid int64) ([]*model.Order, error)
+	ListOrders(ctx context.Context, uid int64) ([]model.Order, error)
 	GetBalance(ctx context.Context, uid int64) (*model.Balance, error)
-	ListWithdrawals(ctx context.Context, uid int64) ([]*model.Withdrawal, error)
+	ListWithdrawals(ctx context.Context, uid int64) ([]model.Withdrawal, error)
 	CreateWithdrawal(ctx context.Context, dto *model.WithdrawalDTO) error
 }
 
 type SessionStorage interface {
-	Set(int64) (string, error)
-	Get(string) (int64, bool)
+	Set(context.Context, int64) (string, error)
+	Get(context.Context, string) (int64, bool)
 }
 
 type Server struct {
@@ -70,7 +71,7 @@ func NewServer(storage Repository, session SessionStorage, cfg *Config) (*Server
 func (s *Server) Run(ctx context.Context) error {
 	logger.Log.Info("Server started.")
 
-	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := s.srv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 

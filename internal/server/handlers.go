@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -49,7 +51,7 @@ func (s *Server) registerHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	userId, err := s.storage.CreateUser(ctx, dto.Login, string(hash))
+	userID, err := s.storage.CreateUser(ctx, dto.Login, string(hash))
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrUserExists):
@@ -60,7 +62,7 @@ func (s *Server) registerHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	sid, err := s.session.Set(userId)
+	sid, err := s.session.Set(req.Context(), userID)
 	if err != nil {
 		http.Error(res, err.Error(), http.StatusInternalServerError)
 		return
@@ -97,7 +99,7 @@ func (s *Server) loginHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	sid, err := s.session.Set(user.Id)
+	sid, err := s.session.Set(req.Context(), user.ID)
 	if err != nil {
 		http.Error(res, err.Error(), http.StatusInternalServerError)
 		return
@@ -116,38 +118,19 @@ func (s *Server) uploadOrderHandler(res http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	for _, b := range body {
-		if b < 0x30 || b > 0x39 {
-			http.Error(res, "", http.StatusBadRequest)
-			return
-		}
-	}
-
-	if !luhn(body) {
-		http.Error(res, "", http.StatusUnprocessableEntity)
+	if ok, code := validateOrderID(body); !ok {
+		http.Error(res, "", code)
 		return
 	}
 
 	ctx := req.Context()
-	uid := ctx.Value("uid").(int64)
+	uid := UID(ctx)
 
-	order, err := s.storage.GetOrderByNumber(ctx, string(body))
-	if err != nil && !errors.Is(err, storage.ErrOrderNotFound) {
-		http.Error(res, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if order != nil {
-		if order.UserId == uid {
+	if _, err := s.storage.CreateOrder(ctx, uid, string(body)); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			res.WriteHeader(http.StatusOK)
 			return
 		}
-
-		http.Error(res, "", http.StatusConflict)
-		return
-	}
-
-	if err := s.storage.CreateOrder(ctx, uid, string(body)); err != nil {
 		http.Error(res, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -157,7 +140,7 @@ func (s *Server) uploadOrderHandler(res http.ResponseWriter, req *http.Request) 
 
 func (s *Server) listOrderHandler(res http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	uid := ctx.Value("uid").(int64)
+	uid := UID(ctx)
 
 	orders, err := s.storage.ListOrders(ctx, uid)
 	if err != nil {
@@ -177,7 +160,7 @@ func (s *Server) listOrderHandler(res http.ResponseWriter, req *http.Request) {
 
 func (s *Server) getBalanceHandler(res http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	uid := ctx.Value("uid").(int64)
+	uid := UID(ctx)
 
 	balance, err := s.storage.GetBalance(ctx, uid)
 	if err != nil {
@@ -193,7 +176,7 @@ func (s *Server) getBalanceHandler(res http.ResponseWriter, req *http.Request) {
 
 func (s *Server) listWithdrawalsHandler(res http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	uid := ctx.Value("uid").(int64)
+	uid := UID(ctx)
 
 	withdrawals, err := s.storage.ListWithdrawals(ctx, uid)
 	if err != nil {
@@ -212,7 +195,7 @@ func (s *Server) listWithdrawalsHandler(res http.ResponseWriter, req *http.Reque
 }
 
 func (s *Server) withdrawHandler(res http.ResponseWriter, req *http.Request) {
-	uid := req.Context().Value("uid").(int64)
+	uid := UID(req.Context())
 
 	var dto model.WithdrawalDTO
 	if err := json.NewDecoder(req.Body).Decode(&dto); err != nil {
@@ -220,31 +203,17 @@ func (s *Server) withdrawHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	for _, b := range dto.Order {
-		if b < 0x30 || b > 0x39 {
-			http.Error(res, "", http.StatusUnprocessableEntity)
+	if ok, code := validateOrderID([]byte(dto.Order)); !ok {
+		http.Error(res, "", code)
+		return
+	}
+
+	dto.UserID = uid
+	if err := s.storage.CreateWithdrawal(req.Context(), &dto); err != nil {
+		if errors.Is(err, storage.ErrBalanceInsufficient) {
+			http.Error(res, "", http.StatusPaymentRequired)
 			return
 		}
-	}
-
-	if !luhn([]byte(dto.Order)) {
-		http.Error(res, "", http.StatusUnprocessableEntity)
-		return
-	}
-
-	balance, err := s.storage.GetBalance(req.Context(), uid)
-	if err != nil {
-		http.Error(res, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if balance.Current < dto.Sum {
-		http.Error(res, "", http.StatusPaymentRequired)
-		return
-	}
-
-	dto.UserId = uid
-	if err := s.storage.CreateWithdrawal(req.Context(), &dto); err != nil {
 		http.Error(res, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -264,4 +233,17 @@ func luhn(s []byte) bool {
 	}
 
 	return sum%10 == 0
+}
+
+func UID(ctx context.Context) int64 {
+	uid := ctx.Value(uidKey).(int64)
+	return uid
+}
+
+func validateOrderID(b []byte) (bool, int) {
+	if !luhn(b) {
+		return false, http.StatusUnprocessableEntity
+	}
+
+	return true, 0
 }

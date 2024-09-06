@@ -6,22 +6,22 @@ import (
 )
 
 type Order struct {
-	Id        int64         `db:"id" json:"-"`
-	Number    string        `db:"number" json:"number"`
-	UserId    int64         `db:"user_id" json:"-"`
-	Status    string        `db:"status" json:"status"`
-	Accrual   sql.NullInt64 `db:"accrual" json:"accrual,omitempty"`
-	CreatedAt string        `db:"created_at" json:"uploaded_at"`
+	ID        int64           `db:"id" json:"-"`
+	Number    string          `db:"number" json:"number"`
+	UserID    int64           `db:"user_id" json:"-"`
+	Status    string          `db:"status" json:"status"`
+	Accrual   sql.NullFloat64 `db:"accrual" json:"accrual,omitempty"`
+	CreatedAt string          `db:"created_at" json:"uploaded_at"`
 }
 
-func (v Order) MarshalJSON() (b []byte, err error) {
+func (v Order) MarshalJSON() ([]byte, error) {
 	type OrderAlias Order
 
-	value := v.Accrual.Int64
+	value := v.Accrual.Float64
 
 	aliasValue := struct {
 		OrderAlias
-		Accrual int64 `json:"accrual,omitempty"`
+		Accrual float64 `json:"accrual,omitempty"`
 	}{
 		OrderAlias: (OrderAlias)(v),
 		Accrual:    value,

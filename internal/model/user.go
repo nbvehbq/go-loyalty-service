@@ -6,7 +6,7 @@ type RegisterDTO struct {
 }
 
 type User struct {
-	Id           int64  `db:"id" json:"id"`
+	ID           int64  `db:"id" json:"id"`
 	Login        string `db:"login" json:"login"`
 	PasswordHash string `db:"password_hash" json:"-"`
 }

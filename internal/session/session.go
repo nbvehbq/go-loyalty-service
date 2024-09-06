@@ -44,7 +44,7 @@ func NewSessionStorage(ctx context.Context) *Session {
 	return &s
 }
 
-func (s *Session) Set(id int64) (string, error) {
+func (s *Session) Set(_ context.Context, id int64) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -60,7 +60,7 @@ func (s *Session) Set(id int64) (string, error) {
 	return sid, nil
 }
 
-func (s *Session) Get(sid string) (int64, bool) {
+func (s *Session) Get(_ context.Context, sid string) (int64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -73,6 +73,9 @@ func (s *Session) Get(sid string) (int64, bool) {
 }
 
 func (s *Session) reduceSessions() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	now := time.Now()
 	for k, v := range s.storage {
 		if now.After(v.expires) {
