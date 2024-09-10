@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nbvehbq/go-loyalty-service/internal/accrual"
 	"github.com/nbvehbq/go-loyalty-service/internal/logger"
 	"github.com/nbvehbq/go-loyalty-service/internal/server"
 	"github.com/nbvehbq/go-loyalty-service/internal/session"
@@ -38,6 +39,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err, "create server")
 	}
+
+	accrual := accrual.NewAccrual(cfg.AccrualAddress, db)
+	accrual.Run(ctx)
 
 	go func() {
 		stop := make(chan os.Signal, 1)

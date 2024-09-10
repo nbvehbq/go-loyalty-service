@@ -6,21 +6,21 @@ import (
 )
 
 type Balance struct {
-	Current  float64         `db:"current" json:"current"`
-	Windrawn sql.NullFloat64 `db:"windrawn" json:"windrawn"`
+	Current   float64         `db:"current" json:"current"`
+	Withdrawn sql.NullFloat64 `db:"withdrawn" json:"withdrawn"`
 }
 
 func (v Balance) MarshalJSON() ([]byte, error) {
 	type Balancelias Balance
 
-	value := v.Windrawn.Float64
+	value := v.Withdrawn.Float64
 
 	aliasValue := struct {
 		Balancelias
-		Windrawn float64 `json:"windrawn"`
+		Withdrawn float64 `json:"withdrawn"`
 	}{
 		Balancelias: (Balancelias)(v),
-		Windrawn:    value,
+		Withdrawn:   value,
 	}
 
 	return json.Marshal(aliasValue)
