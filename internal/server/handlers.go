@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -126,12 +125,19 @@ func (s *Server) uploadOrderHandler(res http.ResponseWriter, req *http.Request) 
 	ctx := req.Context()
 	uid := UID(ctx)
 
-	if _, err := s.storage.CreateOrder(ctx, uid, string(body)); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			res.WriteHeader(http.StatusOK)
-			return
-		}
+	userID, err := s.storage.CreateOrder(ctx, uid, string(body))
+	if err != nil {
 		http.Error(res, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if userID == 0 {
+		res.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if userID != uid {
+		http.Error(res, "", http.StatusConflict)
 		return
 	}
 
@@ -164,6 +170,7 @@ func (s *Server) getBalanceHandler(res http.ResponseWriter, req *http.Request) {
 
 	balance, err := s.storage.GetBalance(ctx, uid)
 	if err != nil {
+		logger.Log.Error("get balance", zap.Error(err), zap.Int64("uid", uid))
 		http.Error(res, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -214,6 +221,7 @@ func (s *Server) withdrawHandler(res http.ResponseWriter, req *http.Request) {
 			http.Error(res, "", http.StatusPaymentRequired)
 			return
 		}
+		logger.Log.Error("internal error", zap.Error(err))
 		http.Error(res, err.Error(), http.StatusInternalServerError)
 		return
 	}

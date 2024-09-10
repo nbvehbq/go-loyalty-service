@@ -54,7 +54,7 @@ func initDatabaseStructure(ctx context.Context, db *sqlx.DB) error {
 	
 	CREATE UNIQUE INDEX IF NOT EXISTS "user_login_key" ON "user"("login");
 
-	CREATE TABLE IF NOT EXISTS "order" (
+	CREATE TABLE IF NOT EXISTS "orders" (
 		id SERIAL NOT NULL,
 		number TEXT NOT NULL,
 		user_id INTEGER NOT NULL,
@@ -66,16 +66,16 @@ func initDatabaseStructure(ctx context.Context, db *sqlx.DB) error {
 		CONSTRAINT "order_number_key" UNIQUE ("number")
 	);
 
-	CREATE INDEX IF NOT EXISTS "order_createdAt_idx" ON "order"(created_at DESC);
+	CREATE INDEX IF NOT EXISTS "order_createdAt_idx" ON "orders"(created_at DESC);
 
-	ALTER TABLE "order" DROP CONSTRAINT IF EXISTS "order_user_fkey";
-	ALTER TABLE "order" ADD CONSTRAINT "order_user_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+	ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "order_user_fkey";
+	ALTER TABLE "orders" ADD CONSTRAINT "order_user_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 	
 	CREATE TABLE IF NOT EXISTS "withdrawal" (
 		id SERIAL NOT NULL,
 		user_id INTEGER NOT NULL,
 		"order" TEXT NOT NULL,
-		sum INT NOT NULL,
+		sum DOUBLE PRECISION NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
 		CONSTRAINT "withdrawal_id_pkey" PRIMARY KEY ("id")
@@ -126,20 +126,28 @@ func (s *Storage) GetUserByLogin(ctx context.Context, login string) (*model.User
 }
 
 func (s *Storage) CreateOrder(ctx context.Context, uid int64, order string) (int64, error) {
-	var res int64
-	query := `INSERT INTO "order" (number, user_id, status) VALUES ($1, $2, $3)
-	ON CONFLICT DO NOTHING RETURNING id;`
+	var res sql.NullInt64
+	query := `
+	WITH ins as (
+		INSERT INTO "orders" (number, user_id, status) VALUES ($1, $2, $3)
+		ON CONFLICT DO NOTHING 
+		RETURNING user_id
+	)
+	SELECT COALESCE (
+		(SELECT user_id FROM "orders" WHERE number = $1 and user_id != $2),
+		(SELECT user_id FROM ins)
+	) AS user_id;`
 
 	if err := s.db.QueryRowContext(ctx, query, order, uid, StatusNew).Scan(&res); err != nil {
 		return 0, errors.Wrap(err, "create order")
 	}
 
-	return res, nil
+	return res.Int64, nil
 }
 
 func (s *Storage) GetOrderByNumber(ctx context.Context, number string) (*model.Order, error) {
 	var order model.Order
-	query := `SELECT id, number, user_id, status, accrual, created_at FROM "order" WHERE number = $1;`
+	query := `SELECT id, number, user_id, status, accrual, created_at FROM "orders" WHERE number = $1;`
 
 	if err := s.db.GetContext(ctx, &order, query, number); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -153,7 +161,7 @@ func (s *Storage) GetOrderByNumber(ctx context.Context, number string) (*model.O
 
 func (s *Storage) ListOrders(ctx context.Context, uid int64) ([]model.Order, error) {
 	var orders []model.Order
-	query := `SELECT id, number, user_id, status, accrual, created_at FROM "order" 
+	query := `SELECT id, number, user_id, status, accrual, created_at FROM "orders" 
 	WHERE user_id = $1 ORDER BY created_at DESC;`
 
 	if err := s.db.SelectContext(ctx, &orders, query, uid); err != nil {
@@ -166,10 +174,11 @@ func (s *Storage) ListOrders(ctx context.Context, uid int64) ([]model.Order, err
 func (s *Storage) GetBalance(ctx context.Context, uid int64) (*model.Balance, error) {
 	var balance model.Balance
 	query := `
-	SELECT u.balance as "current", w.windrawn FROM "user" u
+	SELECT u.balance as "current", w.Withdrawn FROM "user" u
 	LEFT JOIN (
-		SELECT user_id, SUM(sum) windrawn FROM "withdrawal" WHERE user_id = $1 GROUP BY user_id
-	) w ON w.user_id = u.id;`
+		SELECT user_id, SUM(sum) Withdrawn FROM "withdrawal" WHERE user_id = $1 GROUP BY user_id
+	) w ON w.user_id = u.id
+	WHERE u.id = $1;`
 
 	if err := s.db.GetContext(ctx, &balance, query, uid); err != nil {
 		return nil, errors.Wrap(err, "get balance")
@@ -192,12 +201,13 @@ func (s *Storage) ListWithdrawals(ctx context.Context, uid int64) ([]model.Withd
 
 func (s *Storage) CreateWithdrawal(ctx context.Context, dto *model.WithdrawalDTO) error {
 	tx, err := s.db.Begin()
-	defer tx.Rollback()
-
-	query := `INSERT INTO "withdrawal" (user_id, "order", sum) VALUES ($1, $2, $3);`
 	if err != nil {
 		return errors.Wrap(err, "begin transaction")
 	}
+
+	defer tx.Rollback()
+
+	query := `INSERT INTO "withdrawal" (user_id, "order", sum) VALUES ($1, $2, $3);`
 
 	if _, err := tx.ExecContext(ctx, query, dto.UserID, dto.Order, dto.Sum); err != nil {
 		return errors.Wrap(err, "create withdrawal")
@@ -218,4 +228,47 @@ func (s *Storage) CreateWithdrawal(ctx context.Context, dto *model.WithdrawalDTO
 	}
 
 	return nil
+}
+
+func (s *Storage) ListUnaccruedOrders(ctx context.Context) ([]model.Order, error) {
+	var orders []model.Order
+	query := `SELECT id, number, user_id, status, accrual, created_at FROM "orders" 
+	WHERE status NOT IN ('INVALID', 'PROCESSED');`
+
+	if err := s.db.SelectContext(ctx, &orders, query); err != nil {
+		return nil, errors.Wrap(err, "list orders")
+	}
+
+	return orders, nil
+}
+
+func (s *Storage) SetAccrual(ctx context.Context, a model.Accrual) (*model.Order, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, errors.Wrap(err, "begin transaction")
+	}
+
+	defer tx.Rollback()
+
+	var order model.Order
+
+	query := `UPDATE "orders" SET status = $1, accrual = $2 WHERE number = $3 
+	RETURNING id, number, user_id, status, accrual, created_at;`
+
+	if err := tx.QueryRowContext(ctx, query, a.Status, a.Accrual, a.Order).
+		Scan(&order.ID, &order.Number, &order.UserID, &order.Status, &order.Accrual, &order.CreatedAt); err != nil {
+		return nil, errors.Wrap(err, "update order")
+	}
+
+	query = `UPDATE "user" SET balance = balance + $1 WHERE id = $2;`
+	if _, err := tx.ExecContext(ctx, query, a.Accrual, a.UserID); err != nil {
+		return nil, errors.Wrap(err, "update balance")
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return nil, errors.Wrap(err, "commit")
+	}
+
+	return &order, nil
 }
